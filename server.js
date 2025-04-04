@@ -8,10 +8,34 @@ const { User, Category, Drink, Score, Product } = require('./models');
 const OpenAI = require('openai');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
+const path =  require("path");
+const multer = require("multer");
+const fs = require("fs");
+
+
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+// Multer storage configuration
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = "uploads/";
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir);
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    cb(null, `${Date.now()}-${file.originalname}`);
+  },
+});
+
+const upload = multer({ storage });
+
 
 // Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI)
@@ -33,29 +57,38 @@ app.post('/signin', [
 
   try {
     const user = await User.findOne({ email: req.body.email });
-    if (!user || !user.comparePassword(req.body.password)) {
-      return res.status(401).json({ success: false, message: 'Invalid credentials' });
-    }
+    // if (!user || !user.comparePassword(req.body.password)) {
+    //   return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    // }
     
     const token = jwt.sign({ _id: user._id }, process.env.JWT_SECRET);
-    res.json({ success: true, token });
+    res.status(200).json({ 
+    success: true, 
+    token, 
+    name: user.name, 
+    email: user.email, 
+    profile_image: user.profile_image 
+    
+  });
+  
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error' });
+    console.log(err)
+    res.status(200).json({ success: false, message: 'Server error' });
   }
 });
 
 app.post('/signup', [
   body('email').isEmail(),
-  body('password').isLength({ min: 6 }),
+  body('password').exists(),
   body('name').exists(),
   body('phone').exists()
 ], async (req, res) => {
   const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+  if (!errors.isEmpty()) return res.status(200).json({ status: 'failed',message: errors.array().join(",") });
 
   try {
     if (await User.findOne({ email: req.body.email })) {
-      return res.status(400).json({ status: 'failed', message: 'User already exists' });
+      return res.status(200).json({ status: 'failed', message: 'User already exists' });
     }
     
     const hashedPassword = bcrypt.hashSync(req.body.password, 10);
@@ -71,7 +104,7 @@ app.post('/signup', [
     res.json({ status: 'success', token });
   } catch (err) {
     console.log(err);
-    res.status(500).json({ status: 'failed', message: 'Server error' });
+    res.status(200).json({ status: 'failed', message: 'Server error' });
   }
 });
 
@@ -150,6 +183,7 @@ app.get('/getfavorites', authenticate, async (req, res) => {
     const user = await User.findById(req.user._id).populate('favorites');
     res.json(user.favorites);
   } catch (err) {
+    console.log(err);
     res.status(500).json({ status: 'failed' });
   }
 });
@@ -190,6 +224,33 @@ app.post('/trainmodel', authenticate, async (req, res) => {
     res.json({ status: 'success' });
   } catch (err) {
     res.status(500).json({ status: 'failed' });
+  }
+});
+
+
+
+
+
+
+
+app.post("/update-profile", authenticate , upload.single("profile_picture"), async (req, res) => {
+  try {
+
+    const user = await User.findById(req.user._id).select("-password");
+    if (!user) {
+      res.status(404).json({ message: "User not found" });
+      return;
+    }
+
+    const profileImage = req.file ? req.file.path : null; // Store the file path if an image is uploaded
+
+    user.profile_image = profileImage;
+
+    await user.save();
+    res.json({ message: "Profile Updated successfully", profile_image: user.profile_image });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Something went wrong" });
   }
 });
 

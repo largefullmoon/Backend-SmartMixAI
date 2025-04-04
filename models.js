@@ -6,6 +6,7 @@ const UserSchema = new mongoose.Schema({
   password: String,
   phone: String,
   name: String,
+  profile_image: {  type: String, default: 'https://www.gravatar.com/avatar/' },
   favorites: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Drink' }],
   history: [{ 
     drink: { type: mongoose.Schema.Types.ObjectId, ref: 'Drink' },
