@@ -8,6 +8,9 @@ const UserSchema = new mongoose.Schema({
   name: String,
   profile_image: {  type: String, default: 'https://www.gravatar.com/avatar/' },
   favorites: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Drink' }],
+  scores: { type : Object, required: false },
+  liked: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Drink' }],
+  disliked: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Drink' }],
   history: [{ 
     drink: { type: mongoose.Schema.Types.ObjectId, ref: 'Drink' },
     date: { type: Date, default: Date.now }
@@ -19,14 +22,16 @@ UserSchema.methods.comparePassword = function(password) {
 };
 
 const CategorySchema = new mongoose.Schema({
-  name: String
+  name: String,
+  imageUrl: { type: String, required : false  }
 });
 
 const DrinkSchema = new mongoose.Schema({
   name: String,
   category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category' },
   details: Object,
-  ingredients: [String]
+  ingredients: [String],
+  imageUrl: { type: String, required : false  }
 });
 
 const ScoreSchema = new mongoose.Schema({

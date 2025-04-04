@@ -12,3 +12,10 @@ exports.authenticate = (req, res, next) => {
     res.status(400).send('Invalid token');
   }
 };
+
+
+
+exports.successResponse = (data) => ({
+  success : true,
+  data : data
+})

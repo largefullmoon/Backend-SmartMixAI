@@ -3,7 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const { body, validationResult } = require('express-validator');
 const jwt = require('jsonwebtoken');
-const { authenticate } = require('./auth');
+const { authenticate, successResponse } = require('./auth');
 const { User, Category, Drink, Score, Product } = require('./models');
 const OpenAI = require('openai');
 const cors = require('cors');
@@ -11,6 +11,7 @@ const bcrypt = require('bcrypt');
 const path =  require("path");
 const multer = require("multer");
 const fs = require("fs");
+const { url } = require('inspector');
 
 
 
@@ -62,13 +63,21 @@ app.post('/signin', [
     // }
     
     const token = jwt.sign({ _id: user._id }, process.env.JWT_SECRET);
-    res.status(200).json({ 
-    success: true, 
-    token, 
-    name: user.name, 
-    email: user.email, 
-    profile_image: user.profile_image 
-    
+    console.log({ 
+      success: true, 
+      token, 
+      name: user.name, 
+      email: user.email, 
+      profile_image: user.profile_image, 
+      scores: user.scores,
+  })
+  res.status(200).json({ 
+      success: true, 
+      token, 
+      name: user.name, 
+      email: user.email, 
+      profile_image: user.profile_image, 
+      scores: user.scores,
   });
   
   } catch (err) {
@@ -127,17 +136,38 @@ app.post('/savescore', async (req, res) => {
 app.get('/getcategories', async (req, res) => {
   try {
     const categories = await Category.find();
-    res.json(categories);
+    const response = categories.map(e => ({
+      id : e.id,
+      name: e.name,
+      url: e.imageUrl
+    }));
+    res.json(successResponse(response));
   } catch (err) {
     res.status(500).json({ status: 'failed' });
   }
 });
 
-app.get('/getdrinks', async (req, res) => {
+app.get('/getdrinks', authenticate, async (req, res) => {
   try {
+    const user = await User.findById(req.user._id).populate('favorites');
+    const favoriteDrinkIds = user.favorites.map(fav => fav.id.toString());
     const drinks = await Drink.find().populate('category');
-    res.json(drinks);
+     const response = drinks.map(e => ({
+      id : e.id,
+      name: e.name,
+      url: e.imageUrl,
+      category : e.category.name,
+      details : { 
+        ...e.details,
+        image: e.imageUrl 
+      },
+      isFavorite: favoriteDrinkIds.includes(e.id),
+      ingredients : e.ingredients
+    }));
+    console.log(response)
+    res.json(successResponse(response));
   } catch (err) {
+     console.log(err)
     res.status(500).json({ status: 'failed' });
   }
 });
@@ -162,8 +192,20 @@ app.get('/getscore', authenticate, async (req, res) => {
 
 app.get('/getproduct/:productId', async (req, res) => {
   try {
-    const product = await Product.findById(req.params.productId);
-    res.json(product);
+    const product = await Drink.findById(req.params.productId);
+    console.log(product)
+     const response = {
+      id : product.id,
+      name: product.name,
+      url: product.imageUrl,
+      category : product.category.name,
+      details : { 
+        ...product.details,
+        image: product.imageUrl 
+      },
+      ingredients : product.ingredients
+    };
+    res.json(successResponse(response));
   } catch (err) {
     res.status(500).json({ status: 'failed' });
   }
@@ -181,7 +223,15 @@ app.get('/getingredients', authenticate, async (req, res) => {
 app.get('/getfavorites', authenticate, async (req, res) => {
   try {
     const user = await User.findById(req.user._id).populate('favorites');
-    res.json(user.favorites);
+     const favorites = user.favorites.map(fav => ({
+        id: fav.id,
+        name: fav.name,
+        url: fav.imageUrl,
+        liked: user.liked.includes(fav.id),
+        favorite: true
+      }));
+    console.log({ favorites })
+    res.json(successResponse(favorites));
   } catch (err) {
     console.log(err);
     res.status(500).json({ status: 'failed' });
@@ -229,7 +279,41 @@ app.post('/trainmodel', authenticate, async (req, res) => {
 
 
 
+app.get('/score', authenticate, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id);
+    if (!user || !user.scores) {
+      return res.status(404).json({ status: 'failed', message: 'Scores not found' });
+    }
+    res.json({ status: 'success', scores: user.scores });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: 'failed', message: 'Server error' });
+  }
+});
 
+app.post('/score', authenticate, async (req, res) => {
+  try {
+    const { scores } = req.body;
+
+    if (!scores || typeof scores !== 'object') {
+      return res.status(400).json({ status: 'failed', message: 'Invalid scores data' });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ status: 'failed', message: 'User not found' });
+    }
+
+    user.scores = scores;
+    await user.save();
+
+    res.json({ status: 'success', message: 'Scores updated successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: 'failed', message: 'Server error' });
+  }
+});
 
 
 
@@ -251,6 +335,88 @@ app.post("/update-profile", authenticate , upload.single("profile_picture"), asy
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Something went wrong" });
+  }
+});
+
+
+app.post('/addfavorite', authenticate, async (req, res) => {
+  try {
+    const { drinkId } = req.body;
+
+    if (!drinkId) {
+      return res.json({ status: 'failed', message: 'Drink ID is required' });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.json({ status: 'failed', message: 'User not found' });
+    }
+
+    if (user.favorites.includes(drinkId)) {
+      return res.json({ status: 'failed', message: 'Drink is already in favorites' });
+    }
+
+    user.favorites.push(drinkId);
+    await user.save();
+
+    res.json({ status: 'success', message: 'Drink added to favorites' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: 'failed', message: 'Server error' });
+  }
+});
+
+app.post('/like', authenticate, async (req, res) => {
+  try {
+    const { drinkId } = req.body;
+
+    if (!drinkId) {
+      return res.status(400).json({ status: 'failed', message: 'Drink ID is required' });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ status: 'failed', message: 'User not found' });
+    }
+
+    if (user.liked.includes(drinkId)) {
+      return res.status(400).json({ status: 'failed', message: 'Drink is already in liked list' });
+    }
+
+    user.liked.push(drinkId);
+    await user.save();
+
+    res.json({ status: 'success', message: 'Drink added to liked list' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: 'failed', message: 'Server error' });
+  }
+});
+
+app.post('/dislike', authenticate, async (req, res) => {
+  try {
+    const { drinkId } = req.body;
+
+    if (!drinkId) {
+      return res.status(400).json({ status: 'failed', message: 'Drink ID is required' });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ status: 'failed', message: 'User not found' });
+    }
+
+    if (user.disliked.includes(drinkId)) {
+      return res.status(400).json({ status: 'failed', message: 'Drink is already in disliked list' });
+    }
+
+    user.disliked.push(drinkId);
+    await user.save();
+
+    res.json({ status: 'success', message: 'Drink added to disliked list' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ status: 'failed', message: 'Server error' });
   }
 });
 
