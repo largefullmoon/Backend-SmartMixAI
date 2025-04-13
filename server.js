@@ -141,9 +141,10 @@ app.get('/getcategories', async (req, res) => {
       name: e.name,
       url: e.imageUrl
     }));
+    console.log(response);
     res.json(successResponse(response));
   } catch (err) {
-    res.status(500).json({ status: 'failed' });
+    res.status(500).json({ status: 'failed', error: error.message });
   }
 });
 
